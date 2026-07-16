@@ -44,6 +44,7 @@ CREATE TABLE carreras (
     nombre              VARCHAR(150) NOT NULL,
     duracion_semestres  SMALLINT NOT NULL CHECK (duracion_semestres > 0),
     titulo_otorgado     VARCHAR(150),
+    horas_extension_requeridas SMALLINT NOT NULL DEFAULT 0 CHECK (horas_extension_requeridas >= 0),
     activo              BOOLEAN NOT NULL DEFAULT TRUE
 );
 
@@ -335,6 +336,53 @@ CREATE TABLE pagos (
 );
 
 -- =====================================================================
+-- MÓDULO E: EGRESAMIENTO
+-- =====================================================================
+
+-- Registro de horas de extensión/pasantías cumplidas, cargadas por el
+-- área correspondiente (Bienestar Estudiantil, Prácticas Profesionales, etc.).
+CREATE TABLE horas_extension_estudiante (
+    id                  SERIAL PRIMARY KEY,
+    estudiante_id       INTEGER NOT NULL REFERENCES estudiantes(id) ON DELETE RESTRICT,
+    tipo                VARCHAR(20) NOT NULL CHECK (tipo IN ('EXTENSION', 'PASANTIA', 'VOLUNTARIADO')),
+    horas               NUMERIC(6,2) NOT NULL CHECK (horas > 0),
+    institucion         VARCHAR(150),
+    fecha_carga         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    verificado          BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+-- Solicitud de egreso: dispara la auditoría de graduación.
+CREATE TABLE solicitudes_egreso (
+    id                  SERIAL PRIMARY KEY,
+    estudiante_id       INTEGER NOT NULL REFERENCES estudiantes(id) ON DELETE RESTRICT,
+    fecha_solicitud     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    estado              VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE'
+                            CHECK (estado IN ('PENDIENTE', 'APROBADA', 'RECHAZADA')),
+    fecha_resolucion    TIMESTAMPTZ,
+    observaciones       VARCHAR(500)
+);
+
+-- Detalle de auditoría: snapshot de cada requisito evaluado, para trazabilidad
+-- de por qué se aprobó o rechazó una solicitud de egreso.
+CREATE TABLE solicitud_egreso_requisitos (
+    id                      SERIAL PRIMARY KEY,
+    solicitud_egreso_id     INTEGER NOT NULL REFERENCES solicitudes_egreso(id) ON DELETE CASCADE,
+    requisito               VARCHAR(30) NOT NULL
+                                CHECK (requisito IN ('MALLA_COMPLETA', 'HORAS_EXTENSION', 'SALDO_FINANCIERO')),
+    cumplido                BOOLEAN NOT NULL,
+    detalle                 VARCHAR(500),
+    UNIQUE (solicitud_egreso_id, requisito)
+);
+
+CREATE TABLE titulos_emitidos (
+    id                  SERIAL PRIMARY KEY,
+    estudiante_id       INTEGER NOT NULL UNIQUE REFERENCES estudiantes(id) ON DELETE RESTRICT,
+    solicitud_egreso_id INTEGER NOT NULL UNIQUE REFERENCES solicitudes_egreso(id) ON DELETE RESTRICT,
+    numero_titulo       VARCHAR(30) NOT NULL UNIQUE,
+    fecha_emision       DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+-- =====================================================================
 -- ÍNDICES DE APOYO A CONSULTAS FRECUENTES
 -- =====================================================================
 
@@ -348,3 +396,5 @@ CREATE INDEX idx_calificaciones_estudiante ON calificaciones_instrumento (estudi
 CREATE INDEX idx_actas_detalle_estudiante ON actas_examen_final_detalle (estudiante_id);
 CREATE INDEX idx_cuentas_por_cobrar_estudiante ON cuentas_por_cobrar (estudiante_id, estado);
 CREATE INDEX idx_pagos_cuenta ON pagos (cuenta_por_cobrar_id);
+CREATE INDEX idx_horas_extension_estudiante ON horas_extension_estudiante (estudiante_id);
+CREATE INDEX idx_solicitudes_egreso_estudiante ON solicitudes_egreso (estudiante_id);

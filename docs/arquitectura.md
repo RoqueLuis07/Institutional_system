@@ -105,3 +105,9 @@ modulos/admision-inscripcion/
   Estudiante) y un cliente HTTP tipado generado desde el contrato de la API
   (OpenAPI) para mantener sincronizados frontend y backend a medida que
   crecen los módulos.
+
+## Flujo completo end-to-end
+
+Con los cinco módulos ya diseñados (A-E), `docs/flujo_completo.md` conecta
+el ciclo de vida completo del estudiante (Postulante → Egresado) y define
+el catálogo de eventos de dominio que atraviesa todos los módulos.
