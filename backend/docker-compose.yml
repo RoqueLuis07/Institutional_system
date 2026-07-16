@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sga
+      POSTGRES_PASSWORD: sga
+      POSTGRES_DB: sga
+    ports:
+      - "5432:5432"
+    volumes:
+      - sga_pgdata:/var/lib/postgresql/data
+
+volumes:
+  sga_pgdata:
