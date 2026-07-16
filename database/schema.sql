@@ -1,7 +1,10 @@
 -- =====================================================================
 -- Sistema de Gestión Universitaria (SGA/SIS)
 -- Esquema relacional PostgreSQL
--- Fase 1: Módulo A (Infraestructura Académica) y Módulo B (Admisión e Inscripción)
+-- Módulo A: Infraestructura Académica
+-- Módulo B: Admisión e Inscripción
+-- Módulo C: Cursada y Evaluación
+-- Módulo D: Financiero (Caja y Cuentas por Cobrar)
 -- =====================================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -232,6 +235,106 @@ CREATE TABLE historial_academico (
 );
 
 -- =====================================================================
+-- MÓDULO C: CURSADA Y EVALUACIÓN
+-- =====================================================================
+
+-- Asistencia diaria tomada por el docente sobre una sección.
+CREATE TABLE clases (
+    id                  SERIAL PRIMARY KEY,
+    seccion_id          INTEGER NOT NULL REFERENCES secciones(id) ON DELETE CASCADE,
+    fecha               DATE NOT NULL,
+    tema                VARCHAR(255),
+    UNIQUE (seccion_id, fecha)
+);
+
+CREATE TABLE asistencias (
+    id                  SERIAL PRIMARY KEY,
+    clase_id            INTEGER NOT NULL REFERENCES clases(id) ON DELETE CASCADE,
+    estudiante_id       INTEGER NOT NULL REFERENCES estudiantes(id) ON DELETE RESTRICT,
+    presente            BOOLEAN NOT NULL,
+    UNIQUE (clase_id, estudiante_id)
+);
+
+-- Instrumentos de evaluación continua: trabajos prácticos, parciales, etc.
+CREATE TABLE instrumentos_evaluacion (
+    id                  SERIAL PRIMARY KEY,
+    seccion_id          INTEGER NOT NULL REFERENCES secciones(id) ON DELETE CASCADE,
+    nombre              VARCHAR(150) NOT NULL,
+    tipo                VARCHAR(20) NOT NULL
+                            CHECK (tipo IN ('TRABAJO_PRACTICO', 'PARCIAL', 'OTRO')),
+    ponderacion         NUMERIC(5,2) NOT NULL CHECK (ponderacion > 0 AND ponderacion <= 100),
+    fecha               DATE
+);
+
+CREATE TABLE calificaciones_instrumento (
+    id                      SERIAL PRIMARY KEY,
+    instrumento_id          INTEGER NOT NULL REFERENCES instrumentos_evaluacion(id) ON DELETE CASCADE,
+    estudiante_id           INTEGER NOT NULL REFERENCES estudiantes(id) ON DELETE RESTRICT,
+    nota                    NUMERIC(4,2) NOT NULL CHECK (nota BETWEEN 0 AND 10),
+    fecha_carga             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (instrumento_id, estudiante_id)
+);
+
+-- Actas de examen final: una por sección/llamado. Consolida la nota final
+-- del alumno y, al cerrarse, impacta en historial_academico.
+CREATE TABLE actas_examen_final (
+    id                  SERIAL PRIMARY KEY,
+    seccion_id          INTEGER NOT NULL REFERENCES secciones(id) ON DELETE RESTRICT,
+    fecha_examen        DATE NOT NULL,
+    numero_llamado      SMALLINT NOT NULL CHECK (numero_llamado > 0),
+    estado              VARCHAR(20) NOT NULL DEFAULT 'ABIERTA'
+                            CHECK (estado IN ('ABIERTA', 'CERRADA')),
+    cerrada_en          TIMESTAMPTZ,
+    UNIQUE (seccion_id, numero_llamado)
+);
+
+CREATE TABLE actas_examen_final_detalle (
+    id                      SERIAL PRIMARY KEY,
+    acta_id                 INTEGER NOT NULL REFERENCES actas_examen_final(id) ON DELETE CASCADE,
+    estudiante_id           INTEGER NOT NULL REFERENCES estudiantes(id) ON DELETE RESTRICT,
+    nota_proceso            NUMERIC(4,2) CHECK (nota_proceso BETWEEN 0 AND 10),
+    nota_examen             NUMERIC(4,2) CHECK (nota_examen BETWEEN 0 AND 10),
+    nota_final              NUMERIC(4,2) CHECK (nota_final BETWEEN 0 AND 10),
+    condicion               VARCHAR(20) NOT NULL
+                                CHECK (condicion IN ('APROBADA', 'DESAPROBADA', 'AUSENTE')),
+    UNIQUE (acta_id, estudiante_id)
+);
+
+-- =====================================================================
+-- MÓDULO D: FINANCIERO (CAJA Y CUENTAS POR COBRAR)
+-- =====================================================================
+
+CREATE TABLE conceptos_arancel (
+    id                  SERIAL PRIMARY KEY,
+    codigo              VARCHAR(20) NOT NULL UNIQUE, -- 'MATRICULA', 'ARANCEL_CURSADA', 'CUOTA', 'EXAMEN_EXTRAORDINARIO', 'CERTIFICADO', 'MULTA_BIBLIOTECA'
+    nombre              VARCHAR(150) NOT NULL,
+    monto_base          NUMERIC(12,2) NOT NULL CHECK (monto_base >= 0)
+);
+
+-- Cabecera de deuda generada para un estudiante (por inscripción a período,
+-- por arancel especial, por multa, etc.).
+CREATE TABLE cuentas_por_cobrar (
+    id                      SERIAL PRIMARY KEY,
+    estudiante_id           INTEGER NOT NULL REFERENCES estudiantes(id) ON DELETE RESTRICT,
+    concepto_id             INTEGER NOT NULL REFERENCES conceptos_arancel(id) ON DELETE RESTRICT,
+    periodo_academico_id    INTEGER REFERENCES periodos_academicos(id) ON DELETE RESTRICT, -- NULL para aranceles no ligados a un período
+    monto                   NUMERIC(12,2) NOT NULL CHECK (monto >= 0),
+    fecha_vencimiento       DATE NOT NULL,
+    estado                  VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE'
+                                CHECK (estado IN ('PENDIENTE', 'PAGADA', 'VENCIDA', 'ANULADA')),
+    generado_en             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE pagos (
+    id                      SERIAL PRIMARY KEY,
+    cuenta_por_cobrar_id    INTEGER NOT NULL REFERENCES cuentas_por_cobrar(id) ON DELETE RESTRICT,
+    monto_pagado            NUMERIC(12,2) NOT NULL CHECK (monto_pagado > 0),
+    medio_pago              VARCHAR(30) NOT NULL CHECK (medio_pago IN ('EFECTIVO', 'TARJETA', 'TRANSFERENCIA', 'OTRO')),
+    numero_recibo           VARCHAR(30) NOT NULL UNIQUE,
+    fecha_pago              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- =====================================================================
 -- ÍNDICES DE APOYO A CONSULTAS FRECUENTES
 -- =====================================================================
 
@@ -240,3 +343,8 @@ CREATE INDEX idx_inscripciones_seccion_seccion ON inscripciones_seccion (seccion
 CREATE INDEX idx_historial_estudiante ON historial_academico (estudiante_id);
 CREATE INDEX idx_historial_estudiante_condicion ON historial_academico (estudiante_id, condicion);
 CREATE INDEX idx_estudiantes_carrera ON estudiantes (carrera_id);
+CREATE INDEX idx_asistencias_estudiante ON asistencias (estudiante_id);
+CREATE INDEX idx_calificaciones_estudiante ON calificaciones_instrumento (estudiante_id);
+CREATE INDEX idx_actas_detalle_estudiante ON actas_examen_final_detalle (estudiante_id);
+CREATE INDEX idx_cuentas_por_cobrar_estudiante ON cuentas_por_cobrar (estudiante_id, estado);
+CREATE INDEX idx_pagos_cuenta ON pagos (cuenta_por_cobrar_id);
